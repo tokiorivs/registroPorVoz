@@ -3,6 +3,7 @@
 //   FISH_API_KEY  (obligatoria)  tu API key de Fish Audio
 //   FISH_VOICE_ID (opcional)     ID de la voz elegida en fish.audio
 //   FISH_MODEL    (opcional)     por defecto s2.1-pro; usa s2.1-pro-free en el plan gratuito
+//   APP_PASSWORD  (obligatoria)  contraseña de acceso; sin ella el script rechaza todo
 //   GEMINI_API_KEY (obligatoria) API key de Google AI Studio, para limpiar lo que dice el participante
 //   GEMINI_MODEL  (opcional)     por defecto gemini-3.5-flash-lite
 
@@ -91,6 +92,15 @@ function tts(text) {
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
+    const expected = PropertiesService.getScriptProperties().getProperty("APP_PASSWORD");
+    if (!expected || String(data.pw || "") !== expected) {
+      return ContentService.createTextOutput(JSON.stringify({ ok: false, error: "no autorizado" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    if (data.action === "auth") {
+      return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     if (data.action === "tts") {
       return ContentService.createTextOutput(JSON.stringify(tts(data.text)))
         .setMimeType(ContentService.MimeType.JSON);

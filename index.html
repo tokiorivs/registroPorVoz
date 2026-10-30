@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#05090f">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+<meta name="googlebot" content="noindex, nofollow">
 <title>Asistente de registro</title>
 <style>
   :root { color-scheme: dark; --bg:#05090f; --panel:#0b141f; --line:#12324a; --cyan:#4fd8ff; --cyan2:#1b9bd1; --text:#d7f3ff; --muted:#6f94a8; --warn:#ffb347; --ok:#3be6a0; --err:#ff5c7a; }
@@ -47,6 +49,11 @@
   #heard { font-size:clamp(1rem, 2.4vw, 1.4rem); color:var(--warn); min-height:1.4em; }
 
   /* ---------- Campos ---------- */
+  .confirm { display:flex; gap:14px; width:100%; max-width:760px; }
+  .confirm[hidden] { display:none; }
+  .confirm button { flex:1; padding:18px 12px; font-size:1.15rem; font-weight:600; border-radius:14px; letter-spacing:.06em; }
+  .confirm .yes { border-color:var(--ok); color:var(--ok); background:rgba(59,230,160,.12); }
+  .confirm .no  { border-color:var(--err); color:var(--err); background:rgba(255,92,122,.1); }
   form { width:100%; max-width:760px; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   .field { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; transition:border-color .2s, box-shadow .2s; }
   .field.active { border-color:var(--cyan); box-shadow:0 0 18px rgba(79,216,255,.35); }
@@ -58,9 +65,22 @@
   button:active { background:rgba(79,216,255,.3); }
   button:disabled { opacity:.4; }
   @media (max-width:560px) { form { grid-template-columns:1fr; } }
+  #lock { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center; background:var(--bg); padding:20px; }
+  #lock[hidden] { display:none; }
+  #lock form { display:flex; flex-direction:column; gap:14px; width:min(100%, 320px); }
+  #lock input { font:inherit; font-size:1.1rem; padding:14px; border-radius:12px; border:1px solid var(--cyan2); background:var(--panel); color:var(--text); user-select:text; }
+  #lockMsg { min-height:1.2em; color:var(--err); font-size:.9rem; text-align:center; }
 </style>
 </head>
 <body data-state="idle">
+  <div id="lock">
+    <form id="lockForm">
+      <header style="text-align:center">Acceso</header>
+      <input id="pw" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+      <button type="submit" class="main" id="pwBtn">Entrar</button>
+      <div id="lockMsg" aria-live="polite"></div>
+    </form>
+  </div>
   <canvas id="bg" aria-hidden="true"></canvas>
   <header>Asistente de registro</header>
 
@@ -73,6 +93,11 @@
   <div class="msg" aria-live="polite">
     <div id="assistant">Toca el círculo para comenzar</div>
     <div id="heard"></div>
+  </div>
+
+  <div class="confirm" id="confirm" hidden>
+    <button type="button" class="yes" id="yes">✔ Sí, es correcto</button>
+    <button type="button" class="no" id="no">✖ No, repetir</button>
   </div>
 
   <form id="form">
@@ -98,6 +123,30 @@ const RESET_MS = 4500;         // pausa antes de atender al siguiente participan
 const $ = id => document.getElementById(id);
 $("label1").textContent = LABEL_1;
 $("label2").textContent = LABEL_2;
+
+// ---------- Contraseña (se valida en Apps Script; aquí solo se guarda para enviarla) ----------
+const getPw = () => { try { return localStorage.getItem("pw") || ""; } catch (_) { return ""; } };
+const setPw = v => { try { v ? localStorage.setItem("pw", v) : localStorage.removeItem("pw"); } catch (_) {} };
+function relock(msg) { setPw(""); $("lock").hidden = false; $("lockMsg").textContent = msg || ""; $("pw").value = ""; $("pw").focus(); }
+async function checkPw(pw) {
+  const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body:JSON.stringify({ action:"auth", pw }) });
+  return (await res.json()).ok === true;
+}
+$("lockForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const pw = $("pw").value, btn = $("pwBtn");
+  btn.disabled = true; $("lockMsg").textContent = "";
+  try {
+    if (await checkPw(pw)) { setPw(pw); $("lock").hidden = true; }
+    else { $("lockMsg").textContent = "Contraseña incorrecta"; $("pw").select(); }
+  } catch (_) { $("lockMsg").textContent = "No se pudo verificar. Revisa la conexión."; }
+  btn.disabled = false;
+});
+(async () => {
+  if (!getPw()) return relock();
+  try { if (await checkPw(getPw())) $("lock").hidden = true; else relock(); }
+  catch (_) { $("lock").hidden = true; }   // sin red: se deja pasar, el servidor igual rechaza sin contraseña válida
+})();
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -137,9 +186,9 @@ let currentAudio = null;
 async function fetchFish(text) {
   if (audioCache.has(text)) return audioCache.get(text);
   if (SCRIPT_URL.startsWith("PEGA_AQUI")) throw new Error("SCRIPT_URL sin configurar");
-  const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body:JSON.stringify({ action:"tts", text }) });
+  const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body:JSON.stringify({ action:"tts", text, pw:getPw() }) });
   const data = await res.json();
-  if (!data.ok) throw new Error(data.error || "Error de Fish Audio");
+  if (!data.ok) { if (data.error === "no autorizado") relock(); throw new Error(data.error || "Error de Fish Audio"); }
   audioCache.set(text, data.audio);
   return data.audio;
 }
@@ -251,11 +300,12 @@ async function refine(fieldId, raw, id) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 7000);
     const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, signal:ctl.signal,
-      body:JSON.stringify({ action:"extract", field:label, hint, text:raw }) });
+      body:JSON.stringify({ action:"extract", field:label, hint, text:raw, pw:getPw() }) });
     clearTimeout(timer);
     const data = await res.json();
     if (id !== runId) throw CANCEL;
     if (data.ok && data.value) return data.value;
+    if (!data.ok && data.error === "no autorizado") relock();
     if (data.ok) return raw.trim().split(/\s+/).length <= 5 ? cleanLocal(fieldId, raw) : "";   // Gemini no vio el dato: si la frase es corta, se acepta con reglas locales
     console.warn("Gemini:", data.error);
   } catch (e) {
@@ -263,6 +313,27 @@ async function refine(fieldId, raw, id) {
     console.warn("Gemini no disponible, uso reglas locales:", e);
   }
   return cleanLocal(fieldId, raw);
+}
+
+// Botones Sí / No en pantalla: sirven cuando el micrófono (o el auricular) no capta la respuesta
+function waitButton() {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  const yes = $("yes"), no = $("no");
+  const onYes = () => done("yes"), onNo = () => done("no");
+  function cleanup() {
+    yes.removeEventListener("click", onYes); no.removeEventListener("click", onNo);
+    $("confirm").hidden = true;
+  }
+  function done(v) { cleanup(); resolve(v); }
+  yes.addEventListener("click", onYes); no.addEventListener("click", onNo);
+  $("confirm").hidden = false;
+  return { promise, cancel: cleanup };
+}
+
+function stopSound() {
+  if (currentAudio) { try { currentAudio.pause(); } catch (_) {} currentAudio = null; }
+  if (rec) { try { rec.abort(); } catch (_) {} rec = null; }
 }
 
 // Pregunta un dato, lo confirma y lo guarda en el campo
@@ -280,12 +351,22 @@ async function ask(fieldId, boxNum, prompt, id) {
     $(fieldId).value = value; heard(value);
 
     for (let c = 0; c < 2; c++) {
-      await speak(`Entendí ${value}. ¿Es correcto?`, id);
-      const ans = await listen(id, 6000);
-      checkFatal();
-      if (isYes(ans)) return;
-      if (isNo(ans)) break;
-      if (c === 1) break;
+      const btn = waitButton();
+      try {
+        // La respuesta puede llegar por botón (en cualquier momento) o por voz
+        const said = speak(`Entendí ${value}. ¿Es correcto?`, id).then(() => null);
+        said.catch(() => {});
+        let ans = await Promise.race([said, btn.promise]);
+        if (ans) stopSound();
+        else {
+          const heardAns = listen(id, 8000);
+          heardAns.catch(() => {});
+          ans = await Promise.race([heardAns, btn.promise]);
+          if (ans === "yes" || ans === "no") stopSound(); else checkFatal();
+        }
+        if (ans === "yes" || isYes(ans)) return;
+        if (ans === "no" || isNo(ans)) break;
+      } finally { btn.cancel(); }
     }
     tries++; question = "De acuerdo. " + prompt;
   }
@@ -334,7 +415,7 @@ async function submit(id) {
   setState("thinking"); say("Registrando…"); heard("");
   try {
     // no-cors: no se puede leer la respuesta, pero Apps Script sí recibe los datos
-    await fetch(SCRIPT_URL, { method:"POST", mode:"no-cors", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body:JSON.stringify({ campo1, campo2 }) });
+    await fetch(SCRIPT_URL, { method:"POST", mode:"no-cors", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body:JSON.stringify({ campo1, campo2, pw:getPw() }) });
   } catch (err) {
     setState("error"); say("No se pudo enviar. Revisa la conexión e intenta de nuevo.");
     running = false; $("start").textContent = "Iniciar";
@@ -350,7 +431,7 @@ async function submit(id) {
 function idle() {
   running = false;
   $("campo1").value = ""; $("campo2").value = "";
-  mark(0); heard(""); setState("idle");
+  mark(0); heard(""); setState("idle"); $("confirm").hidden = true;
   say("Toca el círculo para comenzar");
   $("start").textContent = "Iniciar";
 }
