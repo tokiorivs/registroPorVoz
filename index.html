@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05090f">
+<title>Asistente de registro</title>
+<style>
+  :root { color-scheme: dark; --bg:#05090f; --panel:#0b141f; --line:#12324a; --cyan:#4fd8ff; --cyan2:#1b9bd1; --text:#d7f3ff; --muted:#6f94a8; --warn:#ffb347; --ok:#3be6a0; --err:#ff5c7a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body { margin:0; background:radial-gradient(ellipse at 50% 30%, #0a1a2a 0%, var(--bg) 70%); color:var(--text); font-family:"Segoe UI", system-ui, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:20px 20px 24px; overflow-x:hidden; user-select:none; }
+  #bg { position:fixed; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
+  body > *:not(#bg):not(script) { position:relative; z-index:1; }
+  header { letter-spacing:.35em; font-size:.8rem; color:var(--cyan2); text-transform:uppercase; }
+
+  /* ---------- Orbe ---------- */
+  .stage { position:relative; width:min(60vw, 46vh, 340px); aspect-ratio:1; margin-top:8px; cursor:pointer; }
+  .ring, .core { position:absolute; inset:0; border-radius:50%; }
+  .ring { border:2px solid var(--cyan); opacity:.55; }
+  .r1 { inset:0;   border-style:dashed; animation:spin 22s linear infinite; }
+  .r2 { inset:9%;  border-color:var(--cyan2); border-width:3px; border-top-color:transparent; border-bottom-color:transparent; animation:spin 9s linear infinite reverse; }
+  .r3 { inset:20%; opacity:.35; }
+  .core { inset:30%; background:radial-gradient(circle, #d9f8ff 0%, var(--cyan) 35%, #0f6a94 80%); box-shadow:0 0 50px 8px rgba(79,216,255,.55); animation:breathe 4s ease-in-out infinite; }
+  .wave { position:absolute; inset:30%; border-radius:50%; border:2px solid var(--cyan); opacity:0; }
+
+  body[data-state="speaking"]  .core { animation:talk .55s ease-in-out infinite; }
+  body[data-state="speaking"]  .r1 { animation-duration:6s; }
+  body[data-state="listening"] .core { background:radial-gradient(circle, #fff3dc 0%, var(--warn) 40%, #8a5500 85%); box-shadow:0 0 60px 10px rgba(255,179,71,.55); animation:breathe 1.4s ease-in-out infinite; }
+  body[data-state="listening"] .ring { border-color:var(--warn); }
+  body[data-state="listening"] .wave { border-color:var(--warn); animation:ripple 1.8s ease-out infinite; }
+  body[data-state="listening"] .w2 { animation-delay:.9s; }
+  body[data-state="thinking"] .r2 { animation-duration:1.4s; }
+  body[data-state="done"] .core { background:radial-gradient(circle, #e6fff3 0%, var(--ok) 40%, #0b6b48 85%); box-shadow:0 0 60px 10px rgba(59,230,160,.55); }
+  body[data-state="done"] .ring { border-color:var(--ok); }
+  body[data-state="error"] .core { background:radial-gradient(circle, #ffe3ea 0%, var(--err) 40%, #7a1330 85%); box-shadow:0 0 60px 10px rgba(255,92,122,.5); }
+  body[data-state="error"] .ring { border-color:var(--err); }
+
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes breathe { 50% { transform:scale(1.07); } }
+  @keyframes talk { 0%,100% { transform:scale(.95); } 50% { transform:scale(1.18); } }
+  @keyframes ripple { 0% { transform:scale(1); opacity:.7; } 100% { transform:scale(2.3); opacity:0; } }
+
+  /* ---------- Texto ---------- */
+  .msg { text-align:center; min-height:5.2em; display:flex; flex-direction:column; justify-content:center; gap:8px; padding:0 12px; max-width:760px; }
+  #assistant { font-size:clamp(1.2rem, 3.2vw, 1.9rem); font-weight:300; line-height:1.3; }
+  #heard { font-size:clamp(1rem, 2.4vw, 1.4rem); color:var(--warn); min-height:1.4em; }
+
+  /* ---------- Campos ---------- */
+  form { width:100%; max-width:760px; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .field { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; transition:border-color .2s, box-shadow .2s; }
+  .field.active { border-color:var(--cyan); box-shadow:0 0 18px rgba(79,216,255,.35); }
+  label { display:block; font-size:.7rem; letter-spacing:.2em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  input { width:100%; background:transparent; border:0; outline:0; color:var(--text); font:inherit; font-size:1.2rem; user-select:text; }
+  .actions { grid-column:1 / -1; display:flex; gap:12px; }
+  button { font:inherit; border-radius:12px; border:1px solid var(--cyan2); background:transparent; color:var(--cyan); padding:14px 18px; font-size:1rem; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; }
+  button.main { flex:1; background:rgba(79,216,255,.12); }
+  button:active { background:rgba(79,216,255,.3); }
+  button:disabled { opacity:.4; }
+  @media (max-width:560px) { form { grid-template-columns:1fr; } }
+</style>
+</head>
+<body data-state="idle">
+  <canvas id="bg" aria-hidden="true"></canvas>
+  <header>Asistente de registro</header>
+
+  <div class="stage" id="stage" role="button" aria-label="Iniciar registro">
+    <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+    <div class="wave w1"></div><div class="wave w2"></div>
+    <div class="core"></div>
+  </div>
+
+  <div class="msg" aria-live="polite">
+    <div id="assistant">Toca el círculo para comenzar</div>
+    <div id="heard"></div>
+  </div>
+
+  <form id="form">
+    <div class="field" id="box1"><label for="campo1" id="label1"></label><input id="campo1" autocomplete="off"></div>
+    <div class="field" id="box2"><label for="campo2" id="label2"></label><input id="campo2" autocomplete="off"></div>
+    <div class="actions">
+      <button type="button" id="start" class="main">Iniciar</button>
+      <button type="submit" id="send">Enviar</button>
+    </div>
+  </form>
+
+<script>
+// ====== CONFIGURACIÓN ======
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxUoePWUBJ2rSNX-KaEr1EMog211IJajFCwV3Y6vZ58FosWtXaimdIIsoIa38skbm6w/exec";   // termina en /exec
+const LABEL_1 = "Nombre";
+const LABEL_2 = "Medio de comunicación";
+const HINT_1 = "nombre de una persona";
+const HINT_2 = "nombre de un medio de comunicación: diario, radio, televisión, portal web, etc.";
+const LANG = "es-MX";          // idioma de voz y dictado
+const RESET_MS = 4500;         // pausa antes de atender al siguiente participante
+// ===========================
+
+const $ = id => document.getElementById(id);
+$("label1").textContent = LABEL_1;
+$("label2").textContent = LABEL_2;
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const setState = s => { document.body.dataset.state = s; };
+const say = t => { $("assistant").textContent = t; };
+const heard = t => { $("heard").textContent = t; };
+const mark = n => { $("box1").classList.toggle("active", n === 1); $("box2").classList.toggle("active", n === 2); };
+
+if (!SR) {
+  say("Este navegador no soporta dictado. Usa Chrome en la tablet.");
+  setState("error");
+  $("start").disabled = true;
+}
+
+// ---------- Pantalla siempre encendida (tablet de evento) ----------
+async function keepAwake() {
+  try { if (navigator.wakeLock) await navigator.wakeLock.request("screen"); } catch (_) {}
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) keepAwake(); });
+
+// ---------- Control de ejecución ----------
+let runId = 0, rec = null, lastError = "", running = false;
+const CANCEL = new Error("cancel"), MANUAL = new Error("manual"), FATAL = new Error("fatal"), VOICE_FAIL = new Error("voz");
+
+function cancelAll() {
+  runId++;
+  running = false;
+  if (rec) { try { rec.abort(); } catch (_) {} rec = null; }
+  if (currentAudio) { try { currentAudio.pause(); } catch (_) {} currentAudio = null; }
+}
+
+// ---------- Voz de Fish Audio (la API key vive en Apps Script, no en esta página) ----------
+// La voz del sistema NO se usa nunca: si Fish Audio falla, se avisa en pantalla.
+const audioCache = new Map();
+let currentAudio = null;
+
+async function fetchFish(text) {
+  if (audioCache.has(text)) return audioCache.get(text);
+  if (SCRIPT_URL.startsWith("PEGA_AQUI")) throw new Error("SCRIPT_URL sin configurar");
+  const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body:JSON.stringify({ action:"tts", text }) });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || "Error de Fish Audio");
+  audioCache.set(text, data.audio);
+  return data.audio;
+}
+
+function playAudio(b64, id) {
+  return new Promise((resolve, reject) => {
+    const a = new Audio("data:audio/mpeg;base64," + b64);
+    currentAudio = a;
+    const end = () => { if (currentAudio === a) currentAudio = null; id === runId ? resolve() : reject(CANCEL); };
+    a.onended = end; a.onerror = end;
+    a.play().catch(() => { if (currentAudio === a) currentAudio = null; reject(VOICE_FAIL); });
+  });
+}
+
+// Frases fijas: se piden al abrir la página para que respondan al instante
+function preload() {
+  if (SCRIPT_URL.startsWith("PEGA_AQUI")) return;
+  const q1 = `¿Cuál es tu ${LABEL_1.toLowerCase()}?`, q2 = `¿Cuál es tu ${LABEL_2.toLowerCase()}?`;
+  ["Hola, soy tu asistente de registro.", q1, q2,
+   "No te escuché bien. " + q1, "No te escuché bien. " + q2,
+   "De acuerdo. " + q1, "De acuerdo. " + q2]
+    .forEach(t => fetchFish(t).catch(() => {}));
+}
+preload();
+
+// Pide el audio con hasta 3 intentos
+async function getVoice(text, id) {
+  for (let i = 0; i < 3; i++) {
+    try { return await fetchFish(text); }
+    catch (e) {
+      console.warn("Fish Audio, intento " + (i + 1) + ":", e);
+      await new Promise(r => setTimeout(r, 700 * (i + 1)));
+      if (id !== runId) throw CANCEL;
+    }
+  }
+  throw VOICE_FAIL;
+}
+
+async function speak(text, id) {
+  if (id !== runId) throw CANCEL;
+  say(text); heard(""); setState("thinking");
+  const b64 = await getVoice(text, id);
+  if (id !== runId) throw CANCEL;
+  setState("speaking");
+  await playAudio(b64, id);
+}
+
+// ---------- Dictado ----------
+function listen(id, timeoutMs = 9000) {
+  return new Promise((resolve, reject) => {
+    if (id !== runId) return reject(CANCEL);
+    setState("listening"); lastError = "";
+    const r = new SR();
+    rec = r;
+    r.lang = LANG; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+    let text = "", finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true; clearTimeout(timer);
+      try { r.stop(); } catch (_) {}
+      if (rec === r) rec = null;
+      id === runId ? resolve(text.trim()) : reject(CANCEL);
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    r.onresult = e => { text = Array.from(e.results).map(x => x[0].transcript).join(""); heard(text); };
+    r.onerror = e => { lastError = e.error; finish(); };
+    r.onend = finish;
+    try { r.start(); } catch (_) { finish(); }
+  });
+}
+
+function checkFatal() {
+  const msgs = {
+    "not-allowed": "Necesito permiso para usar el micrófono. Actívalo en el navegador.",
+    "service-not-allowed": "El dictado no está permitido en este navegador.",
+    "network": "No hay conexión para el reconocimiento de voz."
+  };
+  if (msgs[lastError]) { say(msgs[lastError]); heard(""); setState("error"); throw FATAL; }
+}
+
+// ---------- Interpretación ----------
+// Se quitan tildes y signos antes de comparar ("Sí." llega con tilde y punto)
+const words = t => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+const NO_WORDS = new Set(["no", "negativo", "incorrecto", "mal", "falso", "nope"]);
+const YES_WORDS = new Set(["si", "claro", "correcto", "exacto", "afirmativo", "ok", "okey", "okay", "vale", "seguro", "efectivamente", "yes", "perfecto", "listo", "aja"]);
+const YES_PHRASES = ["asi es", "eso es", "esta bien", "por supuesto"];
+const isNo = t => words(t).some(w => NO_WORDS.has(w));
+const isYes = t => {
+  const w = words(t);
+  if (w.some(x => NO_WORDS.has(x))) return false;
+  return w.some(x => YES_WORDS.has(x)) || YES_PHRASES.some(p => w.join(" ").includes(p));
+};
+const tidy = t => t.replace(/[.,;!?¡¿]+$/g, "").trim().replace(/(^|[\s-])(\p{L})/gu, (m, s, a) => s + a.toUpperCase());
+
+// Respaldo sin IA: quita muletillas como "mi medio de comunicación es el diario…"
+function cleanLocal(fieldId, raw) {
+  const t = raw.trim().replace(/[.,;!?¡¿]+$/g, "")
+    .replace(/^(mi\s+)?(nombre|medio(\s+de\s+comunicaci[oó]n)?)\s+(es|se\s+llama)\s+/i, "")
+    .replace(/^(me\s+llamo|soy|trabajo\s+(en|para|con)|vengo\s+(de|del)|represento\s+a|pertenezco\s+a|es)\s+/i, "")
+    .replace(/^(el|la)\s+(?=(diario|peri[oó]dico|canal|radio|revista|portal|medio)\b)/i, "");
+  return tidy(t);
+}
+
+// Gemini (vía Apps Script) extrae solo el dato; si no responde, se usan las reglas locales
+async function refine(fieldId, raw, id) {
+  const label = fieldId === "campo1" ? LABEL_1 : LABEL_2;
+  const hint = fieldId === "campo1" ? HINT_1 : HINT_2;
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 7000);
+    const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, signal:ctl.signal,
+      body:JSON.stringify({ action:"extract", field:label, hint, text:raw }) });
+    clearTimeout(timer);
+    const data = await res.json();
+    if (id !== runId) throw CANCEL;
+    if (data.ok && data.value) return data.value;
+    if (data.ok) return raw.trim().split(/\s+/).length <= 5 ? cleanLocal(fieldId, raw) : "";   // Gemini no vio el dato: si la frase es corta, se acepta con reglas locales
+    console.warn("Gemini:", data.error);
+  } catch (e) {
+    if (e === CANCEL) throw e;
+    console.warn("Gemini no disponible, uso reglas locales:", e);
+  }
+  return cleanLocal(fieldId, raw);
+}
+
+// Pregunta un dato, lo confirma y lo guarda en el campo
+async function ask(fieldId, boxNum, prompt, id) {
+  let question = prompt, tries = 0;
+  mark(boxNum);
+  while (tries < 3) {
+    await speak(question, id);
+    const raw = await listen(id);
+    checkFatal();
+    if (!raw) { tries++; question = "No te escuché bien. " + prompt; continue; }
+    heard(raw); setState("thinking");
+    const value = await refine(fieldId, raw, id);
+    if (!value) { tries++; question = "No te escuché bien. " + prompt; continue; }
+    $(fieldId).value = value; heard(value);
+
+    for (let c = 0; c < 2; c++) {
+      await speak(`Entendí ${value}. ¿Es correcto?`, id);
+      const ans = await listen(id, 6000);
+      checkFatal();
+      if (isYes(ans)) return;
+      if (isNo(ans)) break;
+      if (c === 1) break;
+    }
+    tries++; question = "De acuerdo. " + prompt;
+  }
+  throw MANUAL;
+}
+
+// ---------- Flujo principal ----------
+async function run() {
+  if (running) { cancelAll(); idle(); return; }
+  cancelAll();
+  const id = ++runId; running = true;
+  keepAwake();
+  $("start").textContent = "Cancelar";
+  try {
+    $("campo1").value = ""; $("campo2").value = "";
+    await speak("Hola, soy tu asistente de registro.", id);
+    await ask("campo1", 1, `¿Cuál es tu ${LABEL_1.toLowerCase()}?`, id);
+    await ask("campo2", 2, `¿Cuál es tu ${LABEL_2.toLowerCase()}?`, id);
+    mark(0);
+    await submit(id);
+  } catch (e) {
+    if (e === CANCEL) return;
+    running = false;
+    $("start").textContent = "Iniciar";
+    if (e === MANUAL) {
+      const msg = "No logré entenderte. Escribe los datos en pantalla y toca Enviar.";
+      setState("error"); say(msg);
+      try { await speak(msg, id); } catch (_) {}
+      setState("error");
+      return;
+    }
+    if (e === VOICE_FAIL) {
+      setState("error"); say("No pude conectar con la voz. Revisa la conexión y toca para reintentar.");
+      return;
+    }
+    if (e !== FATAL) { setState("error"); say("Ocurrió un error. Toca para intentar de nuevo."); console.error(e); }
+  }
+}
+
+// ---------- Envío a Google Sheets ----------
+async function submit(id) {
+  const campo1 = $("campo1").value.trim(), campo2 = $("campo2").value.trim();
+  if (!campo1 || !campo2) { setState("error"); say("Faltan datos. Completa los dos campos."); running = false; $("start").textContent = "Iniciar"; return; }
+  if (SCRIPT_URL.startsWith("PEGA_AQUI")) { setState("error"); say("Falta configurar SCRIPT_URL en index.html."); running = false; $("start").textContent = "Iniciar"; return; }
+
+  setState("thinking"); say("Registrando…"); heard("");
+  try {
+    // no-cors: no se puede leer la respuesta, pero Apps Script sí recibe los datos
+    await fetch(SCRIPT_URL, { method:"POST", mode:"no-cors", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body:JSON.stringify({ campo1, campo2 }) });
+  } catch (err) {
+    setState("error"); say("No se pudo enviar. Revisa la conexión e intenta de nuevo.");
+    running = false; $("start").textContent = "Iniciar";
+    return;
+  }
+  setState("done");
+  if (id === runId) { try { await speak(`Listo ${campo1}, quedaste registrado. ¡Gracias!`, id); } catch (_) {} }
+  setState("done"); say(`Registrado: ${campo1}`);
+  running = false;
+  setTimeout(() => { if (!running) idle(); }, RESET_MS);
+}
+
+function idle() {
+  running = false;
+  $("campo1").value = ""; $("campo2").value = "";
+  mark(0); heard(""); setState("idle");
+  say("Toca el círculo para comenzar");
+  $("start").textContent = "Iniciar";
+}
+
+// ---------- Fondo 3D: malla de suelo en perspectiva ----------
+// Canvas 2D: sin librerías y liviano para una tablet.
+// El color y la velocidad siguen el estado del asistente.
+(() => {
+  const cv = $("bg"), ctx = cv.getContext("2d");
+  const COLORS = { idle:[79,216,255], speaking:[79,216,255], thinking:[130,150,255], listening:[255,179,71], done:[59,230,160], error:[255,92,122] };
+  const SPEEDS = { idle:.25, thinking:.9, speaking:.7, listening:.5, done:.4, error:.12 };
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let W = 0, H = 0, dpr = 1, grid = 0, spd = .25;
+  let col = COLORS.idle.slice();
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (reduce) frame();
+  }
+  addEventListener("resize", resize);
+
+  function frame() {
+    const target = COLORS[document.body.dataset.state] || COLORS.idle;
+    for (let i = 0; i < 3; i++) col[i] += (target[i] - col[i]) * .06;
+    const goal = reduce ? 0 : (SPEEDS[document.body.dataset.state] ?? .25);
+    spd += (goal - spd) * .05;
+    grid = (grid + spd * .012) % 1;
+    const c = `${col[0] | 0},${col[1] | 0},${col[2] | 0}`;
+
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, horizon = H * .66;
+
+    // Malla del suelo que avanza hacia la cámara
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 12; i++) {
+      const f = (i + grid) / 12, y = horizon + (H - horizon) * f * f;
+      ctx.strokeStyle = `rgba(${c},${.04 + f * .2})`;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    for (let j = -9; j <= 9; j++) {
+      ctx.strokeStyle = `rgba(${c},.1)`;
+      ctx.beginPath(); ctx.moveTo(cx + j * W * .015, horizon); ctx.lineTo(cx + j * W * .2, H); ctx.stroke();
+    }
+
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  resize();
+  if (!reduce) requestAnimationFrame(frame);
+})();
+
+// ---------- Eventos ----------
+$("stage").addEventListener("click", run);
+$("start").addEventListener("click", run);
+$("form").addEventListener("submit", e => { e.preventDefault(); cancelAll(); submit(runId); });
+</script>
+</body>
+</html>
